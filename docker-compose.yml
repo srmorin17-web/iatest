@@ -1,0 +1,139 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: sparktree-postgres
+    environment:
+      POSTGRES_DB: sparktree_saas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 154859
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Montamos la carpeta entera en lugar del archivo suelto para evitar errores
+      - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # ✅ Le damos 60 segundos para que termine de cargar los SQL
+    restart: unless-stopped
+    networks:
+      - sparktree-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sparktree-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sparktree-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sparktree-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      # ✅ Solo este flag, NADA de --no-experimental-fetch
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - DATABASE_URL=postgresql://postgres:154859@postgres:5432/sparktree_saas
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - USE_REDIS=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/package.json:/app/package.json
+      - ./backend/tsconfig.json:/app/tsconfig.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sparktree-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  #/ worker:
+   #/  build:
+   #/    context: ./backend
+   #/    dockerfile: Dockerfile
+  #/   container_name: sparktree-worker
+    # ✅ CAMBIAR ESTA LÍNEA:
+   #/  command: npx ts-node --transpile-only src/worker.ts
+  #/   environment:
+   #/    - NODE_ENV=development
+    #/   - DATABASE_URL=postgresql://postgres:154859@postgres:5432/sparktree_saas
+   #/    - SUPABASE_URL=${SUPABASE_URL}
+   #/    - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+   #/    - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+   #/    - REDIS_HOST=redis
+   #/    - REDIS_PORT=6379
+   #/   - REDIS_URL=redis://redis:6379
+    #/   - USE_REDIS=true
+    #/   - CHOKIDAR_USEPOLLING=true
+  #/   volumes:
+   #/    - ./backend/src:/app/src
+   #/    - ./backend/tsconfig.json:/app/tsconfig.json
+   #/  depends_on:
+   #/    postgres:
+    #/     condition: service_healthy
+   #/    redis:
+   #/      condition: service_healthy
+   #/  restart: unless-stopped
+   #/  networks:
+   #/    - sparktree-network
+   #/  extra_hosts:
+    #/   - "host.docker.internal:host-gateway"
+      
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sparktree-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000/api}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      # - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - sparktree-network
+
+networks:
+  sparktree-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  #backend_node_modules:
+  #frontend_node_modules:

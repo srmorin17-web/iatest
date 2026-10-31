@@ -1,0 +1,765 @@
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Bot, Plus, Edit, Trash2, Copy, Search, LayoutGrid, List, Sparkles, UserCheck, Tag, X, Activity, DollarSign, LifeBuoy, Megaphone, Compass, HelpCircle, Key, MessageSquare, ArrowUpRight, ArrowRight } from 'lucide-react';
+import { ReactFlowProvider } from '@xyflow/react';
+import { FlowBuilderContent } from '../components/FlowBuilderContent';
+import { flowService, FlowBot } from '../../../services/flowService';
+import { PageHeader } from '../../../components/layout/PageHeader';
+import { PageContainer } from '../../../components/layout/PageContainer';
+import { PageBody } from '../../../components/layout/PageBody';
+import { PageLoader } from '../../../components/layout/PageLoader';
+import { DataTable } from '../../../components/ui/DataTable';
+import { Modal } from '../../../components/ui/Modal';
+import { Dropdown } from '../../../components/ui/Dropdown';
+import { useNotifications } from '../../../contexts/NotificationContext';
+import { FaWhatsapp, FaTelegram, FaInstagram, FaFacebookMessenger, FaTiktok } from 'react-icons/fa';
+
+const TAG_COLORS = [
+  'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-800/50',
+  'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-800/50',
+  'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-800/50',
+  'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-800/50',
+  'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-800/50',
+  'bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-800/50',
+];
+
+const PLATFORM_ICONS: Record<string, any> = {
+  whatsapp: FaWhatsapp,
+  telegram: FaTelegram,
+  instagram: FaInstagram,
+  messenger: FaFacebookMessenger,
+  tiktok: FaTiktok
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  whatsapp: 'bg-emerald-500 text-white',
+  telegram: 'bg-sky-500 text-white',
+  instagram: 'bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-500 text-white',
+  messenger: 'bg-blue-600 text-white',
+  tiktok: 'bg-black text-white'
+};
+
+const CATEGORY_ICONS: Record<string, any> = {
+  sales: DollarSign,
+  support: LifeBuoy,
+  marketing: Megaphone,
+  onboarding: Compass,
+  other: HelpCircle
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  sales: 'Ventas',
+  support: 'Soporte',
+  marketing: 'Marketing',
+  onboarding: 'Inducción',
+  other: 'Otro'
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  sales: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-100/50 dark:border-emerald-500/20',
+  support: 'text-blue-500 bg-blue-50 dark:bg-blue-500/10 border-blue-100/50 dark:border-blue-500/20',
+  marketing: 'text-violet-500 bg-violet-50 dark:bg-violet-500/10 border-violet-100/50 dark:border-violet-500/20',
+  onboarding: 'text-cyan-500 bg-cyan-50 dark:bg-cyan-500/10 border-cyan-100/50 dark:border-cyan-500/20',
+  other: 'text-slate-500 bg-slate-50 dark:bg-slate-500/10 border-slate-100/50 dark:border-slate-500/20'
+};
+
+export const FlowManager = () => {
+  const [flows, setFlows] = useState<FlowBot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingFlow, setEditingFlow] = useState<FlowBot | null>(null);
+  const [selectedDetailFlow, setSelectedDetailFlow] = useState<FlowBot | null>(null);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [tempDescription, setTempDescription] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [newFlowData, setNewFlowData] = useState({
+    name: '',
+    description: '',
+    category: 'other' as 'sales' | 'support' | 'marketing' | 'onboarding' | 'other',
+    triggers: [] as string[]
+  });
+  const [quickEditId, setQuickEditId] = useState<string | null>(null);
+  const [quickEditName, setQuickEditName] = useState('');
+  const { addNotification } = useNotifications();
+
+  // Load flows from API
+  useEffect(() => {
+    const loadFlows = async () => {
+      try {
+        setLoading(true);
+        const data = await flowService.getFlows();
+        setFlows(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Error loading flows:', err);
+        setFlows([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadFlows();
+  }, []);
+
+  const refreshFlows = async () => {
+    try {
+      const data = await flowService.getFlows();
+      setFlows(data);
+    } catch (err) {
+      console.error('Error refreshing flows:', err);
+    }
+  };
+
+  const filteredAndSortedFlows = (Array.isArray(flows) ? flows : [])
+    .filter(flow => {
+      const matchesSearch = flow.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        flow.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = filterCategory === 'all' || flow.category === filterCategory;
+      return matchesSearch && matchesCategory;
+    })
+    .sort((a, b) => new Date(b.lastModified || '').getTime() - new Date(a.lastModified || '').getTime());
+
+  const openFlowBuilder = (flow: FlowBot) => setEditingFlow(flow);
+  const closeFlowBuilder = () => {
+    setEditingFlow(null);
+    refreshFlows(); // Essential to show saved changes when returning to the manager
+  };
+
+  const duplicateFlow = async (flow: FlowBot) => {
+    try {
+      await flowService.duplicateFlow(flow.id);
+      addNotification({ type: 'success', title: 'Flujo duplicado', message: `"${flow.name}" fue duplicado correctamente.` });
+      await refreshFlows();
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Error', message: 'No se pudo duplicar el flujo.' });
+      console.error('Error duplicating flow:', err);
+    }
+  };
+
+  const deleteFlow = async (flowId: string) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar este flujo?')) {
+      try {
+        await flowService.deleteFlow(flowId);
+        addNotification({ type: 'success', title: 'Flujo eliminado', message: 'El flujo fue eliminado correctamente.' });
+        await refreshFlows();
+      } catch (err) {
+        addNotification({ type: 'error', title: 'Error', message: 'No se pudo eliminar el flujo.' });
+        console.error('Error deleting flow:', err);
+      }
+    }
+  };
+
+  const createFlow = async () => {
+    if (!newFlowData.name.trim()) return;
+    try {
+      setLoading(true);
+      const newFlow = await flowService.createFlow({
+        ...newFlowData,
+        status: 'draft',
+        nodes: [{ id: 'trigger_1', type: 'trigger', position: { x: 100, y: 100 }, data: { label: 'Inicio', keywords: newFlowData.triggers } }],
+        edges: []
+      });
+      addNotification({ type: 'success', title: 'Flujo creado', message: `"${newFlowData.name}" fue creado. Ahora puedes configurarlo.` });
+      await refreshFlows();
+      setShowCreateForm(false);
+      setNewFlowData({ name: '', description: '', category: 'other', triggers: [] });
+      openFlowBuilder(newFlow);
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Error', message: 'No se pudo crear el flujo.' });
+      console.error('Error creating flow:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const stats = {
+    total: flows.length,
+    active: flows.filter(f => f.status === 'active').length,
+    draft: flows.filter(f => f.status === 'draft').length,
+    totalConversations: flows.reduce((acc, f) => acc + (f.metrics?.conversations || 0), 0),
+    avgCompletionRate: flows.length > 0 ? Math.round(flows.reduce((acc, f) => acc + (f.metrics?.completionRate || 0), 0) / flows.length) : 0
+  };
+
+  const paginatedFlows = filteredAndSortedFlows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(filteredAndSortedFlows.length / itemsPerPage);
+
+  const columns = [
+    {
+      key: 'flow',
+      header: 'Flujo',
+      render: (_: any, flow: FlowBot) => (
+        <div className="flex items-center gap-4">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center p-2 text-white transition-colors duration-500 ${flow.status === 'active' ? 'bg-emerald-500 shadow-md shadow-emerald-500/20' : 'bg-slate-900'}`}>
+            <Bot className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="font-black text-slate-900 dark:text-white leading-none mb-1.5">{flow.name}</h4>
+            <div className="flex items-center gap-1.5">
+              {(() => {
+                const CatIcon = CATEGORY_ICONS[flow.category] || HelpCircle;
+                return (
+                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border ${CATEGORY_COLORS[flow.category] || CATEGORY_COLORS.other}`}>
+                    <CatIcon className="w-2.5 h-2.5" />
+                    <span>{CATEGORY_LABELS[flow.category] || 'Otro'}</span>
+                  </div>
+                );
+              })()}
+              <span className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border ${flow.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' : 'bg-slate-50 text-slate-400 border-slate-100 dark:bg-slate-800/40 dark:text-slate-500 dark:border-slate-700'}`}>
+                {flow.status === 'active' ? 'Activo' : 'Borrador'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      key: 'triggers',
+      header: 'Triggers',
+      render: (_: any, flow: FlowBot) => (
+        <div className="flex items-center gap-1.5">
+          <Key className="w-3.5 h-3.5 text-slate-400" />
+          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+            {flow.triggers?.length || 0} {flow.triggers?.length === 1 ? 'disparador' : 'disparadores'}
+          </span>
+        </div>
+      )
+    },
+    {
+      key: 'config',
+      header: 'Configuración',
+      render: (_: any, flow: FlowBot) => {
+        const hasAi = flow.nodes?.some(n => n.type === 'llm' || n.type === 'knowledge_retrieval');
+        const hasHandoff = flow.nodes?.some(n => n.type === 'handoff' || (n.type === 'llm' && n.data?.autoHandoff));
+
+        return (
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border ${flow.matchingStrategy === 'flexible' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-accent-50 text-accent-600 border-accent-100'}`}>
+                {flow.matchingStrategy === 'flexible' ? 'Inteligente' : 'Estricto'}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">{flow.nodes?.length || 0} Nodos</span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {hasAi && (
+                <div className="flex items-center justify-center p-1 bg-violet-50 dark:bg-violet-500/10 text-violet-500 dark:text-violet-400 rounded-lg border border-violet-100/50 dark:border-violet-500/20" title="Usa Inteligencia Artificial">
+                  <Sparkles className="w-3 h-3" />
+                </div>
+              )}
+              {hasHandoff && (
+                <div className="flex items-center justify-center p-1 bg-rose-50 dark:bg-rose-500/10 text-rose-500 dark:text-rose-400 rounded-lg border border-rose-100/50 dark:border-rose-500/20" title="Soporta Escalado Humano">
+                  <UserCheck className="w-3 h-3" />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      key: 'actions',
+      header: 'Acciones',
+      className: 'text-center w-[120px]',
+      render: (_: any, flow: FlowBot) => (
+        <div className="flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => openFlowBuilder(flow)}
+            className="p-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl hover:scale-105 transition-all shadow-md"
+            title="Editar Constructor"
+          >
+            <Edit className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => duplicateFlow(flow)}
+            className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-355 rounded-xl hover:scale-105 transition-all border border-slate-200 dark:border-slate-700"
+            title="Duplicar"
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => deleteFlow(flow.id)}
+            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl hover:scale-105 transition-all"
+            title="Eliminar"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )
+    }
+  ];
+
+  const renderEditor = () => {
+    if (!editingFlow) return null;
+    return createPortal(
+      <div className="fixed inset-0 z-[100000] bg-white dark:bg-[#252525] flex flex-col pt-0">
+        <ReactFlowProvider>
+          <FlowBuilderContent flowData={editingFlow} onBack={closeFlowBuilder} />
+        </ReactFlowProvider>
+      </div>,
+      document.body
+    );
+  };
+
+  if (loading) return <PageLoader sectionName="Gestor de Flujos" />;
+
+      const totalFlows = flows.length;
+      const activeFlows = flows.filter(f => f.status === 'active').length;
+      const inactiveFlows = flows.filter(f => f.status !== 'active').length;
+      return (
+    <PageContainer>
+      {renderEditor()}
+      <PageHeader
+        title="Constructor de"
+        highlight="Bots AI"
+        description="Configura el comportamiento y las respuestas automatizadas de tu bot."
+        icon={Bot}
+        meta={[
+          { label: 'Flujos', value: totalFlows, icon: LayoutGrid, color: 'accent' },
+          { label: 'Activos', value: activeFlows, icon: Activity, color: 'emerald' },
+          { label: 'Inactivos', value: inactiveFlows, icon: Activity, color: 'amber' },
+        ]}
+        action={
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="flex items-center justify-center gap-2 px-4 h-10 bg-transparent border-2 border-slate-900 dark:border-white text-emerald-600 dark:text-emerald-400 rounded-xl text-sm font-semibold transition-all duration-200 hover:bg-slate-900 dark:hover:bg-white hover:text-emerald-400 dark:hover:text-emerald-500 active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" strokeWidth={3} /> Nuevo Flujo
+            </button>
+          </div>
+        }
+      />
+
+      <PageBody scrollable={true}>
+
+
+        <div className="bg-white dark:bg-dark-card rounded-xl border border-slate-100 dark:border-slate-800/50 shadow-sm overflow-hidden p-6">
+          <div className="flex flex-col lg:flex-row gap-4 mb-4">
+            <div className="flex-1 relative group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-accent-500 transition-colors" />
+              <input
+                type="text"
+                placeholder="Buscar flujos..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 dark:bg-dark-card border border-gray-200 dark:border-white/5 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent-500/20 focus:border-accent-500 transition-all text-gray-900 dark:text-white text-sm"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Dropdown
+                value={filterCategory}
+                onChange={(v) => setFilterCategory(v)}
+                options={[
+                  { value: 'all', label: 'Categorías (Todas)' },
+                  { value: 'sales', label: 'Ventas' },
+                  { value: 'support', label: 'Soporte' },
+                  { value: 'marketing', label: 'Marketing' },
+                ]}
+              />
+
+              <div className="flex items-center dark:bg-dark-card rounded-xl p-1 border border-gray-200 dark:border-white/5">
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                  title="Vista de Tabla"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white dark:bg-white/10 shadow-sm text-emerald-600 dark:text-emerald-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                  title="Vista de Cuadrícula"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-6">
+              {paginatedFlows.map((flow) => (
+                <div
+                  key={flow.id}
+                  onClick={() => {
+                    setSelectedDetailFlow(flow);
+                    setTempDescription(flow.description || '');
+                    setIsEditingDescription(false);
+                  }}
+                  className="group/card relative overflow-hidden cursor-pointer bg-white dark:bg-dark-card rounded-2xl p-6 border border-gray-150 dark:border-gray-800/80 shadow-sm hover:shadow-xl hover:-translate-y-1 hover:border-accent-500/35 transition-all duration-300 flex flex-col justify-between min-h-[290px]"
+                >
+                  <div>
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white transition-all duration-300 shrink-0 ${flow.status === 'active' ? 'bg-gradient-to-tr from-accent-500 to-accent-600 shadow-md shadow-accent-500/20' : 'bg-slate-800'}`}>
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 group/title">
+                          <h3 className="text-base font-black text-slate-900 dark:text-white truncate" title={flow.name}>{flow.name}</h3>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {(() => {
+                            const CatIcon = CATEGORY_ICONS[flow.category] || HelpCircle;
+                            return (
+                              <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border ${CATEGORY_COLORS[flow.category] || CATEGORY_COLORS.other}`}>
+                                <CatIcon className="w-2.5 h-2.5" />
+                                <span>{CATEGORY_LABELS[flow.category] || 'Otro'}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <span className={`w-2.5 h-2.5 rounded-full ${flow.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-650'}`} />
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {flow.nodes?.some(n => n.type === 'llm' || n.type === 'knowledge_retrieval') && (
+                            <div className="p-1 bg-violet-50 dark:bg-violet-500/10 text-violet-500 dark:text-violet-400 rounded-lg border border-violet-100/50 dark:border-violet-500/20" title="IA Activa">
+                              <Sparkles className="w-3 h-3" />
+                            </div>
+                          )}
+                          {flow.nodes?.some(n => n.type === 'handoff' || (n.type === 'llm' && n.data?.autoHandoff)) && (
+                            <div className="p-1 bg-rose-50 dark:bg-rose-500/10 text-rose-500 dark:text-rose-400 rounded-lg border border-rose-100/50 dark:border-rose-500/20" title="Escalado Humano">
+                              <UserCheck className="w-3 h-3" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-slate-500 dark:text-slate-400 text-xs italic line-clamp-2 mt-4 mb-4 leading-relaxed min-h-[32px]">
+                      {flow.description || 'Sin descripción disponible para este flujo.'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="bg-slate-50/50 dark:bg-white/2 p-2.5 rounded-xl border border-slate-100 dark:border-white/5 flex items-center gap-2.5">
+                        <div className="p-1.5 bg-accent-500/10 text-accent-500 rounded-lg">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Uso Total</p>
+                          <p className="text-xs font-black text-slate-900 dark:text-white mt-0.5">{flow.metrics?.conversations || 0}</p>
+                        </div>
+                      </div>
+                      <div className="bg-slate-50/50 dark:bg-white/2 p-2.5 rounded-xl border border-slate-100 dark:border-white/5 flex items-center gap-2.5">
+                        <div className="p-1.5 bg-sky-500/10 text-sky-500 rounded-lg">
+                          <Key className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Triggers</p>
+                          <p className="text-xs font-black text-slate-900 dark:text-white mt-0.5">{flow.triggers?.length || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="relative h-10 overflow-hidden mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 group-hover/card:opacity-0 transition-opacity duration-200">
+                        Ver Detalles <ArrowRight className="w-3.5 h-3.5" />
+                      </span>
+                      <div className="absolute inset-0 flex items-center justify-end gap-2 translate-y-12 group-hover/card:translate-y-0 opacity-0 group-hover/card:opacity-100 transition-all duration-300" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => openFlowBuilder(flow)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl hover:scale-105 transition-all text-xs font-bold shadow-md"
+                          title="Abrir Constructor de Flujos"
+                        >
+                          <Edit className="w-3 h-3" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          onClick={() => duplicateFlow(flow)}
+                          className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-355 rounded-xl hover:scale-105 transition-all border border-slate-200 dark:border-slate-700"
+                          title="Duplicar"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deleteFlow(flow.id)}
+                          className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl hover:scale-105 transition-all"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <DataTable
+              columns={columns}
+              data={paginatedFlows}
+              pagination={{
+                currentPage,
+                totalPages,
+                onPageChange: setCurrentPage
+              }}
+            />
+          )}
+        </div>
+
+        <Modal
+          open={showCreateForm}
+          onClose={() => setShowCreateForm(false)}
+          title="Crear Nuevo Flujo"
+          size="xl"
+          icon={<div className="w-10 h-10 bg-gradient-to-br from-accent-500 to-accent-600 rounded-xl flex items-center justify-center shadow-lg"><Bot className="w-5 h-5 text-black" /></div>}
+          footer={
+            <div className="flex gap-3">
+              <button onClick={() => setShowCreateForm(false)}
+                className="flex-1 h-11 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">
+                Cancelar
+              </button>
+              <button onClick={createFlow}
+                className="flex-1 h-11 bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-black rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md">
+                Crear Bot
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><Bot className="w-3 h-3" /> Nombre del Flujo</label>
+              <div className="relative">
+                <Bot className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" value={newFlowData.name} onChange={e => setNewFlowData({ ...newFlowData, name: e.target.value })}
+                  className="w-full h-10 pl-10 pr-3.5 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-500/20 focus:border-accent-500 transition-all placeholder:text-slate-400"
+                  placeholder="Ej: Soporte VIP" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><Tag className="w-3 h-3" /> Categoría</label>
+              <Dropdown
+                value={newFlowData.category}
+                onChange={v => setNewFlowData({ ...newFlowData, category: v as any })}
+                options={[
+                  { value: 'sales', label: 'Ventas' },
+                  { value: 'support', label: 'Soporte' },
+                  { value: 'marketing', label: 'Marketing' },
+                  { value: 'other', label: 'Otro' },
+                ]}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5"><Key className="w-3 h-3" /> Palabras Clave (Triggers)</label>
+              <div className="relative">
+                <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" value={newFlowData.triggers.join(', ')}
+                  onChange={e => setNewFlowData({ ...newFlowData, triggers: e.target.value.split(',').map(t => t.trim()).filter(t => t !== '') })}
+                  className="w-full h-10 pl-10 pr-3.5 bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-500/20 focus:border-accent-500 transition-all placeholder:text-slate-400"
+                  placeholder="Ej: hola, precio, info (separadas por coma)" />
+              </div>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Modal de Detalles y Estadísticas de Flujo */}
+        <Modal
+          open={!!selectedDetailFlow}
+          onClose={() => setSelectedDetailFlow(null)}
+          title={selectedDetailFlow?.name || 'Detalles del Flujo'}
+          size="full"
+          icon={
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${selectedDetailFlow?.status === 'active' ? 'bg-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-slate-900'}`}>
+              <Bot className="w-5 h-5" />
+            </div>
+          }
+          footer={
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => setSelectedDetailFlow(null)}
+                className="flex-1 h-11 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+              >
+                Cerrar
+              </button>
+              {selectedDetailFlow && (
+                <button
+                  onClick={() => {
+                    const flow = selectedDetailFlow;
+                    setSelectedDetailFlow(null);
+                    openFlowBuilder(flow);
+                  }}
+                  className="flex-1 h-11 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Constructor</span>
+                </button>
+              )}
+            </div>
+          }
+        >
+          {selectedDetailFlow && (
+            <div className="space-y-6">
+              {/* Encabezado con Estado y Categoría */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800/80">
+                <div>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Categoría</p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {(() => {
+                      const CatIcon = CATEGORY_ICONS[selectedDetailFlow.category] || HelpCircle;
+                      return (
+                        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border ${CATEGORY_COLORS[selectedDetailFlow.category] || CATEGORY_COLORS.other}`}>
+                          <CatIcon className="w-3 h-3" />
+                          <span>{CATEGORY_LABELS[selectedDetailFlow.category] || 'Otro'}</span>
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Estado de Ejecución</p>
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider border mt-1 ${selectedDetailFlow.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' : 'bg-slate-50 text-slate-400 border-slate-100 dark:bg-slate-800/40 dark:text-slate-500 dark:border-slate-700'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${selectedDetailFlow.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                    {selectedDetailFlow.status === 'active' ? 'Activo' : 'Borrador'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Descripción editable en el popup */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Descripción del Flujo</label>
+                  {!isEditingDescription && (
+                    <button
+                      onClick={() => setIsEditingDescription(true)}
+                      className="text-[10px] text-accent-500 hover:text-accent-600 font-bold flex items-center gap-1"
+                    >
+                      <Edit className="w-3 h-3" /> Editar
+                    </button>
+                  )}
+                </div>
+                {isEditingDescription ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={tempDescription}
+                      onChange={(e) => setTempDescription(e.target.value)}
+                      className="w-full min-h-[80px] p-3 bg-white dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-accent-500/20 focus:border-accent-500 transition-all text-slate-800 dark:text-slate-100 leading-relaxed"
+                      placeholder="Agrega una descripción para este bot..."
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => setIsEditingDescription(false)}
+                        className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-bold rounded-lg hover:bg-slate-200 transition-all"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await flowService.updateFlow(selectedDetailFlow.id, { description: tempDescription });
+                            setSelectedDetailFlow({ ...selectedDetailFlow, description: tempDescription });
+                            setIsEditingDescription(false);
+                            addNotification({ type: 'success', title: 'Flujo actualizado', message: 'La descripción se guardó correctamente.' });
+                            refreshFlows();
+                          } catch (err) {
+                            addNotification({ type: 'error', title: 'Error', message: 'No se pudo actualizar la descripción.' });
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-accent-500 text-black text-xs font-black uppercase rounded-lg hover:bg-accent-600 transition-all"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl text-slate-600 dark:text-slate-350 text-xs leading-relaxed italic border border-slate-100 dark:border-slate-800/40">
+                    {selectedDetailFlow.description || 'Sin descripción disponible para este flujo.'}
+                  </p>
+                )}
+              </div>
+
+              {/* Métricas e Indicadores Visuales */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Métricas de Desempeño</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-slate-800/40 text-center">
+                    <div className="mx-auto w-7 h-7 bg-emerald-500/10 text-emerald-500 rounded-lg flex items-center justify-center mb-1.5">
+                      <MessageSquare className="w-4 h-4" />
+                    </div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Uso del Bot</p>
+                    <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{selectedDetailFlow.metrics?.conversations || 0}</p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-slate-800/40 text-center">
+                    <div className="mx-auto w-7 h-7 bg-sky-500/10 text-sky-500 rounded-lg flex items-center justify-center mb-1.5">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Tasa de Éxito</p>
+                    <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{selectedDetailFlow.metrics?.completionRate || 0}%</p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-slate-800/40 text-center">
+                    <div className="mx-auto w-7 h-7 bg-violet-500/10 text-violet-500 rounded-lg flex items-center justify-center mb-1.5">
+                      <LayoutGrid className="w-4 h-4" />
+                    </div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Nodos Activos</p>
+                    <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{selectedDetailFlow.nodes?.length || 0}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lógica de Escalado Inteligente (IA a Humano) */}
+              {(() => {
+                const hasHandoff = selectedDetailFlow.nodes?.some(n => n.type === 'handoff' || (n.type === 'llm' && n.data?.autoHandoff));
+                const handoffNode = selectedDetailFlow.nodes?.find(n => n.type === 'handoff' || (n.type === 'llm' && n.data?.autoHandoff));
+                const threshold = handoffNode?.data?.handoffThreshold || 80;
+
+                return (
+                  <div className="p-4 bg-gradient-to-br from-violet-500/5 via-transparent to-rose-500/5 dark:from-violet-500/10 dark:to-rose-500/10 rounded-2xl border border-violet-100/50 dark:border-violet-500/20">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles className="w-4 h-4 text-violet-500" />
+                      <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Capacidades Cognitivas y Handoff</h4>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mb-3">
+                      Si la IA no responde con confianza, escala automáticamente a un agente humano.
+                    </p>
+
+                    <div className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <UserCheck className={`w-4 h-4 ${hasHandoff ? 'text-rose-500' : 'text-slate-400'}`} />
+                        <div>
+                          <p className="text-[10px] font-black text-slate-700 dark:text-slate-350">Traspaso Humano</p>
+                          <p className="text-[9px] text-slate-400">{hasHandoff ? 'Escalado Inteligente Activado' : 'No configurado en este flujo'}</p>
+                        </div>
+                      </div>
+                      {hasHandoff && (
+                        <div className="text-right">
+                          <span className="text-xs font-black text-rose-500 px-2 py-0.5 bg-rose-50 dark:bg-rose-500/10 rounded-md border border-rose-100/50 dark:border-rose-500/20">
+                            {threshold}% Confianza
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Triggers / Keywords list */}
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Palabras Clave de Entrada (Triggers)</label>
+                <div className="flex flex-wrap gap-1.5 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-slate-800/40">
+                  {selectedDetailFlow.triggers && selectedDetailFlow.triggers.length > 0 ? (
+                    selectedDetailFlow.triggers.map((keyword, index) => (
+                      <span key={index} className="flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <Key className="w-3 h-3 text-slate-400" />
+                        {keyword}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">No se han configurado disparadores para este flujo.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </Modal>
+      </PageBody>
+    </PageContainer>
+  );
+};
+
+
